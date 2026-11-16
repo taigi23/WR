@@ -1,0 +1,597 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>Weekly Report</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Noto+Sans+JP:wght@400;500;700&family=Zen+Kaku+Gothic+New:wght@700;900&display=swap">
+<style>
+html { padding: env(safe-area-inset-top, 0px) 0 env(safe-area-inset-bottom, 0px) }
+body { margin: 0 }
+[hidden] { display: none !important }
+/* Layout: 図面の表題欄のようなヘッダー → 週報/アイデア帳/ジャンルの切替 → 1カラムの読み物＋操作できるアイデア行 */
+:root {
+  --bg: #EDF0F3; --surface: #FBFCFD; --ink: #14202C; --muted: #5A6978; --line: #CBD3DB;
+  --accent: #1846C8; --accent-ink: #FFFFFF;
+  --d0: #1846C8; --d1: #A94A0B; --d2: #6B3FA0; --d3: #9A1F5B; --cross: #0C7566;
+  --star: #9A6408; --done: #24703F; --skip: #66727E; --warn: #A3261B;
+  --tint: #E2E8EE;
+  --f-display: "Zen Kaku Gothic New", "Noto Sans JP", "Hiragino Sans", "Yu Gothic", sans-serif;
+  --f-body: "Noto Sans JP", "Hiragino Sans", "Yu Gothic", Meiryo, sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #10161D; --surface: #18212B; --ink: #E6ECF2; --muted: #93A1B0; --line: #2C3946;
+  --accent: #7DA2FF; --accent-ink: #0B1220;
+  --d0: #7DA2FF; --d1: #F0A262; --d2: #B79CF0; --d3: #F08DB8; --cross: #5CCFBC;
+  --star: #F2C14E; --done: #6FCF97; --skip: #8A97A4; --warn: #FF8A7A;
+  --tint: #212C38; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #10161D; --surface: #18212B; --ink: #E6ECF2; --muted: #93A1B0; --line: #2C3946;
+  --accent: #7DA2FF; --accent-ink: #0B1220;
+  --d0: #7DA2FF; --d1: #F0A262; --d2: #B79CF0; --d3: #F08DB8; --cross: #5CCFBC;
+  --star: #F2C14E; --done: #6FCF97; --skip: #8A97A4; --warn: #FF8A7A;
+  --tint: #212C38; color-scheme: dark }
+
+* { box-sizing: border-box }
+body { background: var(--bg); color: var(--ink); font-family: var(--f-body); font-size: 15px; line-height: 1.75; }
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--bg) }
+.wrap { max-width: 760px; margin: 0 auto; padding-block: 20px 56px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: flex; flex-direction: column; gap: 20px }
+#main { display: flex; flex-direction: column; gap: 20px; min-width: 0 }
+button, input, textarea, select { font: inherit; color: inherit }
+button { cursor: pointer }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px }
+a { color: var(--accent); text-underline-offset: 3px }
+
+/* 表題欄 */
+.plate { border: 1.5px solid var(--ink); background: var(--surface); display: grid; grid-template-columns: 1fr 1fr 1fr }
+.plate h1 { grid-column: 1 / -1; margin: 0; padding: 14px 14px 12px; border-bottom: 1.5px solid var(--ink);
+  font-family: var(--f-display); font-weight: 900; font-size: clamp(22px, 6vw, 30px); line-height: 1.25; letter-spacing: .02em; text-wrap: balance }
+.plate h1 span { display: block; font-family: var(--f-body); font-weight: 500; font-size: 13px; letter-spacing: .08em; color: var(--muted); margin-top: 2px }
+.cell { padding: 8px 12px 9px; min-width: 0; border-right: 1px solid var(--line) }
+.cell:last-child { border-right: 0 }
+.cell dt { font-size: 10.5px; letter-spacing: .12em; color: var(--muted) }
+.cell dd { margin: 0; font-family: var(--f-mono); font-size: 14px; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis }
+.plate dl { display: contents }
+
+/* 切替バー */
+.bar { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: var(--bg); padding-block: 8px; margin-block: -8px;
+  display: flex; gap: 8px; align-items: center; flex-wrap: wrap }
+.seg { display: inline-flex; border: 1px solid var(--ink); background: var(--surface) }
+.seg button { border: 0; background: none; padding: 7px 12px; font-weight: 500; font-size: 14px }
+.seg button + button { border-left: 1px solid var(--ink) }
+.seg button[aria-pressed="true"] { background: var(--ink); color: var(--bg) }
+.pager { margin-left: auto; display: inline-flex; align-items: center; gap: 4px }
+.pager button { width: 36px; height: 36px; border: 1px solid var(--line); background: var(--surface); font-family: var(--f-mono) }
+.pager button:disabled { opacity: .35; cursor: default }
+.pager select { height: 36px; border: 1px solid var(--line); background: var(--surface); padding: 0 6px; font-family: var(--f-mono); font-size: 13px; max-width: 40vw }
+
+section { display: flex; flex-direction: column; gap: 10px; min-width: 0 }
+h2 { margin: 0; font-family: var(--f-display); font-weight: 700; font-size: 18px; letter-spacing: .04em; display: flex; align-items: baseline; gap: 10px }
+h2 small { font-family: var(--f-mono); font-weight: 400; font-size: 12px; color: var(--muted); letter-spacing: 0 }
+
+.points { margin: 0; padding: 12px 14px 12px 34px; background: var(--surface); border-left: 3px solid var(--accent); display: flex; flex-direction: column; gap: 4px }
+
+.chips { display: flex; gap: 6px; flex-wrap: wrap }
+.chip { border: 1px solid var(--line); background: var(--surface); padding: 4px 11px; font-size: 13px; border-radius: 99px; color: var(--muted) }
+.chip[aria-pressed="true"] { background: var(--ink); border-color: var(--ink); color: var(--bg) }
+.chip b { font-family: var(--f-mono); font-weight: 400; margin-left: 4px; font-size: 12px }
+.genres .chip { border-radius: 4px; border-color: var(--ink); color: var(--ink); font-weight: 500 }
+.genres .chip[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink) }
+
+.list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--line) }
+.list > li { padding: 12px 14px; min-width: 0 }
+.list > li + li { border-top: 1px solid var(--line) }
+.news h3, .idea h3 { margin: 0; font-size: 15px; font-weight: 700; line-height: 1.5; text-wrap: balance }
+.news p, .idea p { margin: 2px 0 0; overflow-wrap: anywhere }
+.meta { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 6px; font-size: 12.5px; color: var(--muted) }
+.tag { font-family: var(--f-mono); font-size: 11px; border: 1px solid var(--line); padding: 0 6px; line-height: 1.6 }
+
+.idea { border-left: 3px solid var(--dc, var(--line)) }
+.idea[data-i="0"] { --dc: var(--d0) } .idea[data-i="1"] { --dc: var(--d1) } .idea[data-i="2"] { --dc: var(--d2) } .idea[data-i="3"] { --dc: var(--d3) } .idea[data-i="x"] { --dc: var(--cross) }
+.idea[data-s="skip"] h3, .idea[data-s="skip"] p { color: var(--muted) }
+.idea[data-s="skip"] h3 { text-decoration: line-through; text-decoration-thickness: 1px }
+.idea .head { display: flex; gap: 8px; align-items: center; margin-bottom: 4px; font-family: var(--f-mono); font-size: 11.5px; color: var(--muted) }
+.idea .dom { color: var(--dc, var(--muted)); font-family: var(--f-body); font-weight: 700; font-size: 12px }
+.idea .why { font-size: 13px; color: var(--muted) }
+.idea .why::before { content: "きっかけ "; font-size: 11px; letter-spacing: .08em; border: 1px solid var(--line); padding: 0 5px; margin-right: 6px }
+.acts { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px }
+.act { border: 1px solid var(--line); background: none; padding: 4px 10px; font-size: 13px; color: var(--muted); border-radius: 4px }
+.act[aria-pressed="true"] { color: var(--bg); border-color: var(--sc); background: var(--sc); font-weight: 500 }
+.act[data-v="star"] { --sc: var(--star) } .act[data-v="done"] { --sc: var(--done) } .act[data-v="skip"] { --sc: var(--skip) }
+.act.push { margin-left: auto }
+.act:disabled { opacity: .5; cursor: default }
+.act.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 500 }
+.act.danger { color: var(--warn); border-color: var(--warn) }
+.memo-box { margin-top: 8px; display: flex; flex-direction: column; gap: 2px }
+.memo, .gin { width: 100%; border: 1px solid var(--line); background: var(--bg); padding: 8px 10px; font-size: 14px; line-height: 1.6; border-radius: 4px }
+textarea.memo, textarea.gin { min-height: 64px; resize: vertical }
+.saved { font-size: 11.5px; color: var(--muted); min-height: 1.4em; text-align: right }
+
+/* ジャンル設定 */
+.genre { display: flex; flex-direction: column; gap: 12px }
+.field { display: flex; flex-direction: column; gap: 4px; min-width: 0 }
+.field > label, .field > .lab { font-size: 12px; letter-spacing: .08em; color: var(--muted) }
+.frow { display: flex; gap: 6px; align-items: center }
+.frow .gin { min-width: 0 }
+.frow .dot { width: 10px; height: 10px; border-radius: 50%; flex: none; background: var(--dc) }
+.frow button { flex: none; width: 36px; height: 36px; border: 1px solid var(--line); background: none; border-radius: 4px; color: var(--muted) }
+.state { font-size: 12px; font-family: var(--f-mono); border: 1px solid var(--line); padding: 0 6px; color: var(--muted) }
+.state.on { color: var(--done); border-color: var(--done) }
+
+.search { width: 100%; border: 1px solid var(--line); background: var(--surface); padding: 8px 12px; font-size: 14px; border-radius: 4px }
+.empty { background: var(--surface); border: 1px dashed var(--line); padding: 28px 18px; text-align: center; color: var(--muted) }
+.empty strong { display: block; color: var(--ink); font-family: var(--f-display); font-size: 17px; margin-bottom: 4px }
+details { background: var(--surface); border: 1px solid var(--line); padding: 10px 14px }
+summary { cursor: pointer; font-weight: 500 }
+details ol { margin: 8px 0 0; padding-left: 22px; font-size: 13px; overflow-wrap: anywhere }
+.note { font-size: 12.5px; color: var(--muted); margin: 0 }
+#toast { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(18px + env(safe-area-inset-bottom, 0px)); background: var(--ink); color: var(--bg); padding: 8px 16px; font-size: 13px; border-radius: 4px; z-index: 20; max-width: 90vw }
+.seg button { padding: 7px 10px }
+.filebtn { position: relative; overflow: hidden; display: inline-block }
+.filebtn input { position: absolute; inset: 0; opacity: 0; cursor: pointer; font-size: 40px }
+.box { background: var(--surface); border: 1px solid var(--line); padding: 14px; display: flex; flex-direction: column; gap: 10px }
+.box p { margin: 0 }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="plate">
+    <h1>Weekly Report<span id="c-genre"></span></h1>
+    <dl>
+      <div class="cell"><dt>号</dt><dd id="c-week">—</dd></div>
+      <div class="cell"><dt>調査期間</dt><dd id="c-span">—</dd></div>
+      <div class="cell"><dt>アイデア</dt><dd id="c-count">—</dd></div>
+    </dl>
+  </header>
+
+  <nav class="bar" aria-label="表示切替">
+    <div class="seg">
+      <button type="button" id="v-issue" aria-pressed="true">週報</button>
+      <button type="button" id="v-ideas" aria-pressed="false">アイデア帳</button>
+      <button type="button" id="v-genres" aria-pressed="false">ジャンル</button>
+      <button type="button" id="v-setup" aria-pressed="false">設定</button>
+    </div>
+    <div class="pager" id="pager">
+      <button type="button" id="p-prev" aria-label="前の号">←</button>
+      <select id="p-sel" aria-label="号を選ぶ"></select>
+      <button type="button" id="p-next" aria-label="次の号">→</button>
+    </div>
+  </nav>
+
+  <main id="main"></main>
+</div>
+<div id="toast" hidden></div>
+
+<script>
+(function () {
+  "use strict";
+  var KEY = "weekly-report-v1";
+  var CROSS = "横断", MAX_FOCUS = 4, MAX_GENRES = 6;
+  var STAT = { star: "気になる", done: "検討済み", skip: "見送り" };
+  var NEWS = [["current", "時事"], ["sales", "新製品・販売"], ["industry", "業界動向"]];
+  var VIEWS = ["issue", "ideas", "genres", "setup"];
+
+  /* ------------------------------------------------------------------
+     調査エンジンの差し込み口。
+     いまは未連携（null）。後で Gemini などをつなぐときは、ここに
+       { name: "Gemini", research: function (genre, ctx) { return Promise<結果>; } }
+     を入れる。ctx = { week, from, to, existingIdeas: [アイデア名…] }
+     結果 = { summary: [文字列], news: { current: [], sales: [], industry: [] },
+              watch: [{title, body, date}], sources: [{title, url}],
+              ideas: [{name, aim, trigger, domain}] }   // domain は注力領域の key か "cross"
+     news の各要素 = { title, body, region, date, source, url }
+     ------------------------------------------------------------------ */
+  var ENGINE = null;
+
+  var store = { genres: [], issues: [], ideas: [] };
+  var canStore = true;
+  var curGenre = null, curWeek = {};
+  var view = "issue", newsTab = "current", fDom = "all", fStat = "all", q = "";
+  var openMemo = {}, timers = {}, drafts = {}, confirmDel = null, adding = false, busy = {};
+
+  function h(tag, attrs) {
+    var n = document.createElement(tag), i, k;
+    for (k in (attrs || {})) {
+      if (k === "text") n.textContent = attrs[k];
+      else if (k === "on") for (i in attrs.on) n.addEventListener(i, attrs.on[i]);
+      else if (attrs[k] !== null && attrs[k] !== undefined && attrs[k] !== false) n.setAttribute(k, attrs[k]);
+    }
+    for (i = 2; i < arguments.length; i++) { var c = arguments[i]; if (c) n.append(c); }
+    return n;
+  }
+  function str(v) { return typeof v === "string" ? v : ""; }
+  function arr(v) { return Array.isArray(v) ? v : []; }
+  function safeUrl(u) { return /^https?:\/\//i.test(str(u)) ? u : null; }
+  function weekLabel(w) { var m = /^(\d{4})-W(\d{1,2})$/.exec(str(w)); return m ? m[1] + "年 第" + Number(m[2]) + "週" : str(w); }
+  function md(d) { var m = /^\d{4}-(\d{2})-(\d{2})$/.exec(str(d)); return m ? m[1] + "/" + m[2] : str(d); }
+  function toast(msg) { var t = document.getElementById("toast"); t.textContent = msg; t.hidden = false; clearTimeout(toast.t); toast.t = setTimeout(function () { t.hidden = true; }, 3000); }
+  function ymd(d) { return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); }
+  function isoWeek(d) {
+    var t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+    var day = t.getUTCDay() || 7; t.setUTCDate(t.getUTCDate() + 4 - day);
+    var y0 = new Date(Date.UTC(t.getUTCFullYear(), 0, 1));
+    return t.getUTCFullYear() + "-W" + String(Math.ceil(((t - y0) / 86400000 + 1) / 7)).padStart(2, "0");
+  }
+
+  /* ---------- 保存 ---------- */
+  function normalize(d) {
+    var o = { genres: [], issues: [], ideas: [] };
+    arr(d && d.genres).forEach(function (g) { if (g && str(g.id)) o.genres.push({ id: g.id, name: str(g.name), focus: arr(g.focus).filter(function (f) { return f && str(f.key) && str(f.label); }).map(function (f) { return { key: f.key, label: f.label }; }), regions: str(g.regions), note: str(g.note), enabled: g.enabled !== false, order: typeof g.order === "number" ? g.order : 0 }); });
+    arr(d && d.issues).forEach(function (i) { if (i && str(i.genre) && str(i.week)) o.issues.push({ genre: i.genre, week: i.week, from: str(i.from), to: str(i.to), summary: arr(i.summary).map(str), news: i.news && typeof i.news === "object" ? { current: arr(i.news.current), sales: arr(i.news.sales), industry: arr(i.news.industry) } : { current: [], sales: [], industry: [] }, watch: arr(i.watch), sources: arr(i.sources) }); });
+    arr(d && d.ideas).forEach(function (i) { if (i && str(i.id) && str(i.genre) && str(i.week)) o.ideas.push({ id: i.id, genre: i.genre, week: i.week, no: Number(i.no) || 0, name: str(i.name), aim: str(i.aim), trigger: str(i.trigger), domain: str(i.domain), status: STAT[i.status] ? i.status : "", memo: str(i.memo) }); });
+    return o;
+  }
+  function sortAll() {
+    store.genres.sort(function (a, b) { return a.order - b.order; });
+    store.issues.sort(function (a, b) { return a.week < b.week ? 1 : -1; });
+    store.ideas.sort(function (a, b) { return a.week === b.week ? a.no - b.no : (a.week < b.week ? 1 : -1); });
+  }
+  function load() {
+    try { var raw = localStorage.getItem(KEY); if (raw) store = normalize(JSON.parse(raw)); curGenre = localStorage.getItem(KEY + ":genre"); newsTab = localStorage.getItem(KEY + ":news") || "current"; }
+    catch (e) { canStore = false; }
+    sortAll();
+  }
+  function persist() {
+    sortAll();
+    try { localStorage.setItem(KEY, JSON.stringify(store)); return true; }
+    catch (e) { canStore = false; toast("この端末のブラウザに保存できませんでした"); return false; }
+  }
+  function pref(k, v) { try { localStorage.setItem(KEY + ":" + k, v); } catch (e) {} }
+
+  function genreOf(id) { return store.genres.filter(function (g) { return g.id === id; })[0] || null; }
+  function focusOf(gid) { var g = genreOf(gid); return g ? g.focus : []; }
+  function domInfo(it) {
+    if (it.domain === "cross") return { i: "x", label: CROSS };
+    var fs = focusOf(it.genre);
+    for (var i = 0; i < fs.length; i++) if (fs[i].key === it.domain) return { i: String(i % 4), label: fs[i].label };
+    return { i: "", label: "" };
+  }
+
+  /* ---------- 調査の実行（エンジン連携後に有効） ---------- */
+  function mergeResult(g, ctx, r) {
+    var issue = { genre: g.id, week: ctx.week, from: ctx.from, to: ctx.to, summary: arr(r.summary).map(str).slice(0, 3), news: r.news, watch: arr(r.watch).slice(0, 3), sources: arr(r.sources) };
+    store.issues = store.issues.filter(function (i) { return !(i.genre === g.id && i.week === ctx.week); });
+    store.issues.push(issue);
+    var mine = store.ideas.filter(function (i) { return i.genre === g.id; });
+    var names = {}; mine.forEach(function (i) { names[i.name] = true; });
+    var no = mine.filter(function (i) { return i.week === ctx.week; }).reduce(function (m, i) { return Math.max(m, i.no); }, 0);
+    var keys = g.focus.map(function (f) { return f.key; });
+    var added = 0;
+    arr(r.ideas).forEach(function (x) {
+      var name = str(x && x.name).trim(); if (!name || names[name]) return;
+      names[name] = true; no += 1; added += 1;
+      store.ideas.push({ id: g.id + "-" + ctx.week + "-" + String(no).padStart(2, "0") + "-" + Date.now().toString(36) + added, genre: g.id, week: ctx.week, no: no, name: name, aim: str(x.aim), trigger: str(x.trigger), domain: keys.indexOf(x.domain) >= 0 ? x.domain : "cross", status: "", memo: "" });
+    });
+    store = normalize(store); persist();
+    return added;
+  }
+  function runNow(gid) {
+    var g = genreOf(gid);
+    if (!ENGINE || !g || busy[gid]) return;
+    var now = new Date(), from = new Date(now.getTime() - 7 * 86400000);
+    var ctx = { week: isoWeek(now), from: ymd(from), to: ymd(now), existingIdeas: store.ideas.filter(function (i) { return i.genre === gid; }).map(function (i) { return i.name; }) };
+    busy[gid] = true; render();
+    Promise.resolve().then(function () { return ENGINE.research(g, ctx); }).then(function (r) {
+      delete busy[gid];
+      if (!r || typeof r !== "object") throw new Error("empty");
+      var added = mergeResult(g, ctx, r);
+      curWeek[gid] = ctx.week; toast("「" + g.name + "」の号を更新しました（アイデア " + added + "件を追加）"); render();
+    }).catch(function () { delete busy[gid]; toast("「" + g.name + "」の調査に失敗しました。時間をおいてもう一度お試しください"); render(); });
+  }
+  function runButton(gid, cls) {
+    if (!ENGINE) return null;
+    return h("button", { type: "button", class: "act" + (cls ? " " + cls : ""), text: busy[gid] ? "調査中…" : "今すぐ調査", disabled: !!busy[gid], on: { click: function () { runNow(gid); } } });
+  }
+
+  /* ---------- アイデア ---------- */
+  function ideaRow(it, showWeek) {
+    var d = domInfo(it);
+    var li = h("li", { class: "idea", "data-i": d.i, "data-s": it.status || "" });
+    li.append(h("div", { class: "head" },
+      h("span", { text: (showWeek ? it.week.replace(/^\d{4}-/, "") + "-" : "#") + String(it.no || "").padStart(2, "0") }),
+      h("span", { class: "dom", text: d.label })));
+    li.append(h("h3", { text: it.name }));
+    if (it.aim) li.append(h("p", { text: it.aim }));
+    if (it.trigger) li.append(h("p", { class: "why", text: it.trigger }));
+
+    var acts = h("div", { class: "acts" });
+    Object.keys(STAT).forEach(function (v) {
+      acts.append(h("button", { type: "button", class: "act", "data-v": v, "aria-pressed": String(it.status === v), text: STAT[v],
+        on: { click: function () { it.status = it.status === v ? "" : v; persist(); render(); } } }));
+    });
+    var show = !!it.memo || openMemo[it.id];
+    if (!show) acts.append(h("button", { type: "button", class: "act push", text: "メモを書く",
+      on: { click: function () { openMemo[it.id] = true; render(); var ta = document.getElementById("memo-" + it.id); if (ta) ta.focus(); } } }));
+    li.append(acts);
+
+    if (show) {
+      var note = h("div", { class: "saved", "aria-live": "polite" });
+      var ta = h("textarea", { class: "memo", id: "memo-" + it.id, "aria-label": "メモ", placeholder: "検討メモ（自動で保存されます）" });
+      ta.value = it.memo;
+      function flush() { clearTimeout(timers[it.id]); if (ta.value === it.memo) return; it.memo = ta.value; note.textContent = persist() ? "保存しました" : ""; }
+      ta.addEventListener("input", function () { note.textContent = ""; clearTimeout(timers[it.id]); timers[it.id] = setTimeout(flush, 700); });
+      ta.addEventListener("blur", flush);
+      li.append(h("div", { class: "memo-box" }, ta, note));
+    }
+    return li;
+  }
+
+  function chipRow(items, val, set, label, cls) {
+    var row = h("div", { class: "chips" + (cls ? " " + cls : ""), role: "group", "aria-label": label });
+    items.forEach(function (c) {
+      var b = h("button", { type: "button", class: "chip", "aria-pressed": String(val === c[0]), text: c[1], on: { click: function () { set(c[0]); render(); } } });
+      if (c[2] !== undefined) b.append(h("b", { text: String(c[2]) }));
+      row.append(b);
+    });
+    return row;
+  }
+
+  function ideaSection(pool, showWeek, title) {
+    var sec = h("section");
+    var fs = focusOf(curGenre);
+    var keys = fs.map(function (f) { return f.key; }).concat(["cross"]);
+    if (fDom !== "all" && keys.indexOf(fDom) < 0) fDom = "all";
+    var byDom = function (d) { return pool.filter(function (i) { return d === "all" || i.domain === d; }).length; };
+    var list = pool.filter(function (i) {
+      if (fDom !== "all" && i.domain !== fDom) return false;
+      if (showWeek) {
+        if (fStat === "none" ? !!i.status : (fStat !== "all" && i.status !== fStat)) return false;
+        if (q) { var s = (i.name + " " + i.aim + " " + i.trigger + " " + i.memo).toLowerCase(); if (s.indexOf(q.toLowerCase()) < 0) return false; }
+      }
+      return true;
+    });
+    sec.append(h("h2", { text: title }, h("small", { text: list.length + " / " + pool.length + "件" })));
+    if (showWeek) {
+      var inp = h("input", { class: "search", id: "search", type: "search", placeholder: "アイデア名・狙い・メモを検索", "aria-label": "検索" });
+      inp.value = q;
+      inp.addEventListener("input", function () { q = inp.value; clearTimeout(inp.t); inp.t = setTimeout(function () { render(); var n = document.getElementById("search"); if (n) { n.focus(); n.setSelectionRange(q.length, q.length); } }, 250); });
+      sec.append(inp);
+    }
+    var chips = [["all", "すべて", byDom("all")]];
+    fs.forEach(function (f) { chips.push([f.key, f.label, byDom(f.key)]); });
+    chips.push(["cross", CROSS, byDom("cross")]);
+    sec.append(chipRow(chips, fDom, function (v) { fDom = v; }, "領域で絞り込み"));
+    if (showWeek) sec.append(chipRow([["all", "印すべて"], ["star", STAT.star], ["done", STAT.done], ["skip", STAT.skip], ["none", "印なし"]], fStat, function (v) { fStat = v; }, "印で絞り込み"));
+    if (!list.length) sec.append(h("div", { class: "empty", text: pool.length ? "条件に合うアイデアはありません。絞り込みを変えてください。" : "この号のアイデアはまだありません。" }));
+    else { var ul = h("ul", { class: "list" }); list.forEach(function (i) { ul.append(ideaRow(i, showWeek)); }); sec.append(ul); }
+    return sec;
+  }
+
+  /* ---------- 週報 ---------- */
+  function issueView(main, iss, gIdeas) {
+    var pts = iss.summary.filter(Boolean);
+    if (pts.length) { var ul = h("ul", { class: "points" }); pts.forEach(function (p) { ul.append(h("li", { text: p })); }); main.append(h("section", null, h("h2", { text: "今週の要点" }), ul)); }
+
+    var sec = h("section", null, h("h2", { text: "注目ニュース" }));
+    sec.append(chipRow(NEWS.map(function (n) { return [n[0], n[1], arr(iss.news[n[0]]).length]; }), newsTab, function (v) { newsTab = v; pref("news", v); }, "ニュース区分"));
+    var items = arr(iss.news[newsTab]);
+    if (!items.length) sec.append(h("div", { class: "empty", text: "この区分のニュースはありません。" }));
+    else {
+      var nl = h("ul", { class: "list news" });
+      items.forEach(function (n) {
+        if (!n || typeof n !== "object") return;
+        var meta = h("div", { class: "meta" });
+        if (n.region) meta.append(h("span", { class: "tag", text: str(n.region) }));
+        if (n.date) meta.append(h("span", { text: md(n.date) }));
+        var u = safeUrl(n.url);
+        if (u) meta.append(h("a", { href: u, target: "_blank", rel: "noopener noreferrer", text: str(n.source) || "出典" }));
+        else if (n.source) meta.append(h("span", { text: str(n.source) }));
+        nl.append(h("li", null, h("h3", { text: str(n.title) }), n.body ? h("p", { text: str(n.body) }) : null, meta));
+      });
+      sec.append(nl);
+    }
+    main.append(sec);
+
+    main.append(ideaSection(gIdeas.filter(function (i) { return i.week === iss.week; }), false, "アイデア"));
+
+    var watch = iss.watch.filter(function (w) { return w && typeof w === "object"; });
+    if (watch.length) {
+      var wl = h("ul", { class: "list news" });
+      watch.forEach(function (w) { wl.append(h("li", null, h("h3", { text: str(w.title) }), w.body ? h("p", { text: str(w.body) }) : null, w.date ? h("div", { class: "meta" }, h("span", { class: "tag", text: str(w.date) })) : null)); });
+      main.append(h("section", null, h("h2", { text: "来週ウォッチ" }), wl));
+    }
+    var src = iss.sources.filter(function (s) { return s && typeof s === "object"; });
+    if (src.length) {
+      var ol = h("ol");
+      src.forEach(function (s) { var u = safeUrl(s.url); ol.append(h("li", null, u ? h("a", { href: u, target: "_blank", rel: "noopener noreferrer", text: str(s.title) || u }) : h("span", { text: str(s.title) }))); });
+      main.append(h("details", null, h("summary", { text: "Sources（" + src.length + "件）" }), ol));
+    }
+    var rb = runButton(iss.genre); if (rb) main.append(h("div", null, rb));
+  }
+
+  /* ---------- ジャンル ---------- */
+  function newKey() { return "f" + Math.random().toString(36).slice(2, 8); }
+  function draftOf(g) {
+    if (!drafts[g.id]) drafts[g.id] = { name: g.name, focus: g.focus.map(function (f) { return { key: f.key, label: f.label }; }), regions: g.regions, note: g.note, enabled: g.enabled !== false, dirty: false };
+    return drafts[g.id];
+  }
+  function genreCard(g, isNew) {
+    var d = draftOf(g);
+    var count = store.issues.filter(function (i) { return i.genre === g.id; }).length;
+    var li = h("li", { class: "genre" });
+    var saveBtn = h("button", { type: "button", class: "act primary", text: isNew ? "追加する" : "保存する", disabled: !isNew && !d.dirty });
+    function touch() { d.dirty = true; saveBtn.disabled = false; }
+    function field(label, node) { return h("div", { class: "field" }, h("label", { for: node.id, text: label }), node); }
+    function input(id, key, ph) {
+      var n = h("input", { class: "gin", id: id, type: "text", maxlength: "60", placeholder: ph });
+      n.value = d[key];
+      n.addEventListener("input", function () { d[key] = n.value; touch(); });
+      return n;
+    }
+    li.append(h("div", { class: "meta", style: "margin:0" },
+      h("span", { class: "state" + (d.enabled ? " on" : ""), text: d.enabled ? "調査対象" : "停止中" }),
+      h("span", { text: isNew ? "新しいジャンル" : (count ? "号 " + count + "件" : "まだ号はありません") })));
+    li.append(field("ジャンル名", input("g-name-" + g.id, "name", "例：家電、ロボット、エネルギー")));
+
+    var fbox = h("div", { class: "field" }, h("span", { class: "lab", text: "注力領域（特に厚く調べる分野。最大" + MAX_FOCUS + "つ）" }));
+    d.focus.forEach(function (f, i) {
+      var n = h("input", { class: "gin", id: "g-f-" + g.id + "-" + f.key, type: "text", maxlength: "40", "aria-label": "注力領域" + (i + 1), placeholder: "例：電池、ヒューマンインターフェース" });
+      n.value = f.label;
+      n.addEventListener("input", function () { f.label = n.value; touch(); });
+      fbox.append(h("div", { class: "frow" }, h("span", { class: "dot", style: "--dc:var(--d" + (i % 4) + ")" }), n,
+        h("button", { type: "button", "aria-label": "この領域を外す", text: "×", disabled: d.focus.length <= 1,
+          on: { click: function () { d.focus.splice(i, 1); d.dirty = true; render(); } } })));
+    });
+    if (d.focus.length < MAX_FOCUS) fbox.append(h("div", null, h("button", { type: "button", class: "act", text: "＋ 領域を追加",
+      on: { click: function () { d.focus.push({ key: newKey(), label: "" }); d.dirty = true; render(); var last = d.focus[d.focus.length - 1]; var n = document.getElementById("g-f-" + g.id + "-" + last.key); if (n) n.focus(); } } })));
+    li.append(fbox);
+
+    li.append(field("対象地域", input("g-reg-" + g.id, "regions", "例：日本・米国・欧州・中国")));
+    var ta = h("textarea", { class: "gin", id: "g-note-" + g.id, maxlength: "400", placeholder: "例：家庭用よりも業務用を優先。スタートアップの動きも拾う" });
+    ta.value = d.note;
+    ta.addEventListener("input", function () { d.note = ta.value; touch(); });
+    li.append(field("調べたい観点（任意）", ta));
+
+    var acts = h("div", { class: "acts" });
+    saveBtn.addEventListener("click", function () {
+      var name = d.name.trim();
+      var focus = d.focus.map(function (f) { return { key: f.key, label: f.label.trim() }; }).filter(function (f) { return f.label; });
+      if (!name) { toast("ジャンル名を入れてください"); return; }
+      if (!focus.length) { toast("注力領域を1つ以上入れてください"); return; }
+      var id = isNew ? "g" + Date.now().toString(36) : g.id;
+      var data = { id: id, name: name, focus: focus, regions: d.regions.trim(), note: d.note.trim(), enabled: d.enabled, order: isNew ? Date.now() : g.order };
+      store.genres = store.genres.filter(function (x) { return x.id !== id; }); store.genres.push(data);
+      delete drafts[g.id]; if (isNew) { adding = false; curGenre = id; pref("genre", id); }
+      if (persist()) toast(isNew ? "追加しました" : "保存しました");
+      render();
+    });
+    acts.append(saveBtn);
+    acts.append(h("button", { type: "button", class: "act", "aria-pressed": String(d.enabled), text: d.enabled ? "調査を止める" : "調査を再開する",
+      on: { click: function () { d.enabled = !d.enabled; d.dirty = true; render(); } } }));
+    if (!isNew && !d.dirty) { var rb = runButton(g.id); if (rb) acts.append(rb); }
+    if (isNew) acts.append(h("button", { type: "button", class: "act push", text: "やめる", on: { click: function () { adding = false; delete drafts[g.id]; render(); } } }));
+    else if (confirmDel === g.id) {
+      acts.append(h("button", { type: "button", class: "act danger push", text: count ? "号とアイデアごと削除する" : "削除する", on: { click: function () {
+        confirmDel = null;
+        store.genres = store.genres.filter(function (x) { return x.id !== g.id; });
+        store.issues = store.issues.filter(function (x) { return x.genre !== g.id; });
+        store.ideas = store.ideas.filter(function (x) { return x.genre !== g.id; });
+        delete drafts[g.id]; if (persist()) toast("削除しました"); render();
+      } } }));
+      acts.append(h("button", { type: "button", class: "act", text: "やめる", on: { click: function () { confirmDel = null; render(); } } }));
+    } else acts.append(h("button", { type: "button", class: "act danger push", text: "削除", on: { click: function () { confirmDel = g.id; render(); } } }));
+    li.append(acts);
+    if (confirmDel === g.id && count) li.append(h("p", { class: "note", text: "このジャンルの号 " + count + "件と、印・メモを含むアイデアがすべて消えます。元に戻せません。" }));
+    return li;
+  }
+  function genresView(main) {
+    var sec = h("section", null, h("h2", { text: "調査ジャンル" }, h("small", { text: store.genres.filter(function (g) { return g.enabled; }).length + "件が調査対象" })));
+    sec.append(h("p", { class: "note", text: "調べたい業界やテーマを登録します。注力領域は、アイデアの分類にも使われます。" }));
+    var ul = h("ul", { class: "list" });
+    store.genres.forEach(function (g) { ul.append(genreCard(g, false)); });
+    if (adding) ul.append(genreCard({ id: "new", name: "", focus: [{ key: newKey(), label: "" }, { key: newKey(), label: "" }], regions: "日本・米国・欧州・中国", note: "", enabled: true, order: 0 }, true));
+    if (ul.children.length) sec.append(ul);
+    else sec.append(h("div", { class: "empty" }, h("strong", { text: "ジャンルはまだありません" }), "調べたい業界やテーマを追加してください。"));
+    if (!adding) {
+      if (store.genres.length < MAX_GENRES) sec.append(h("div", null, h("button", { type: "button", class: "act primary", text: "＋ ジャンルを追加", on: { click: function () { adding = true; render(); var n = document.getElementById("g-name-new"); if (n) n.focus(); } } })));
+      else sec.append(h("p", { class: "note", text: "ジャンルは" + MAX_GENRES + "件までです。" }));
+    }
+    main.append(sec);
+  }
+
+  /* ---------- 設定（AI連携・データ） ---------- */
+  function exportData() {
+    var blob = new Blob([JSON.stringify({ app: "weekly-report", version: 1, exportedAt: new Date().toISOString(), genres: store.genres, issues: store.issues, ideas: store.ideas }, null, 1)], { type: "application/json" });
+    var a = h("a", { href: URL.createObjectURL(blob), download: "weekly-report-" + ymd(new Date()) + ".json" });
+    document.body.append(a); a.click(); a.remove(); setTimeout(function () { URL.revokeObjectURL(a.href); }, 5000);
+  }
+  function importData(text) {
+    var inc;
+    try { inc = normalize(JSON.parse(text)); } catch (e) { toast("読み込めませんでした。Weekly Report のデータファイルか確認してください"); return; }
+    if (!inc.genres.length && !inc.issues.length && !inc.ideas.length) { toast("取り込める内容がありませんでした"); return; }
+    inc.genres.forEach(function (g) { store.genres = store.genres.filter(function (x) { return x.id !== g.id; }); store.genres.push(g); });
+    inc.issues.forEach(function (i) { store.issues = store.issues.filter(function (x) { return !(x.genre === i.genre && x.week === i.week); }); store.issues.push(i); });
+    inc.ideas.forEach(function (i) {
+      var old = store.ideas.filter(function (x) { return x.id === i.id; })[0];
+      if (old) { if (!i.status) i.status = old.status; if (!i.memo) i.memo = old.memo; store.ideas = store.ideas.filter(function (x) { return x.id !== i.id; }); }
+      store.ideas.push(i);
+    });
+    drafts = {};
+    if (persist()) toast("読み込みました（ジャンル " + inc.genres.length + "・号 " + inc.issues.length + "・アイデア " + inc.ideas.length + "）");
+    setView("issue");
+  }
+  function setupView(main) {
+    var ai = h("section", null, h("h2", { text: "AI連携" }));
+    ai.append(h("div", { class: "box" },
+      h("div", { class: "meta", style: "margin:0" }, h("span", { class: "state" + (ENGINE ? " on" : ""), text: ENGINE ? ENGINE.name + " と連携中" : "未連携" })),
+      h("p", { text: ENGINE ? "「今すぐ調査」で、ジャンルごとにニュースを調べて号とアイデアを作れます。" : "いまはAIとつながっていないため、このアプリから新しい号は作れません。データの読み込みで号を追加できます。後から Gemini などと連携すると、「今すぐ調査」ボタンが使えるようになります。" })));
+    main.append(ai);
+
+    var data = h("section", null, h("h2", { text: "データ" }));
+    var file = h("input", { type: "file", accept: "application/json,.json", "aria-label": "データファイルを選ぶ" });
+    file.addEventListener("change", function () { var f = file.files && file.files[0]; if (!f) return; var r = new FileReader(); r.onload = function () { importData(String(r.result || "")); }; r.onerror = function () { toast("ファイルを開けませんでした"); }; r.readAsText(f); file.value = ""; });
+    data.append(h("div", { class: "box" },
+      h("p", { text: "ジャンル・号・アイデア・印・メモは、この端末のブラウザの中だけに保存されます。ブラウザのデータを消すと失われるので、ときどき書き出しておくと安心です。" }),
+      h("div", { class: "acts", style: "margin:0" },
+        h("button", { type: "button", class: "act primary", text: "書き出す", on: { click: exportData } }),
+        h("span", { class: "act filebtn" }, "読み込む", file)),
+      h("p", { class: "note", text: "読み込みは今のデータに追加・上書きします。同じアイデアに付けた印とメモは残ります。現在：ジャンル " + store.genres.length + "・号 " + store.issues.length + "・アイデア " + store.ideas.length })));
+    main.append(data);
+  }
+
+  /* ---------- 全体 ---------- */
+  function render() {
+    var main = document.getElementById("main");
+    main.replaceChildren();
+
+    if (!genreOf(curGenre)) { var on = store.genres.filter(function (g) { return g.enabled; })[0] || store.genres[0]; curGenre = on ? on.id : null; }
+    var g = genreOf(curGenre);
+    var gIssues = store.issues.filter(function (i) { return i.genre === curGenre; });
+    var gIdeas = store.ideas.filter(function (i) { return i.genre === curGenre; });
+    var cw = curWeek[curGenre];
+    if (!cw || !gIssues.some(function (i) { return i.week === cw; })) cw = curWeek[curGenre] = gIssues.length ? gIssues[0].week : null;
+    var iss = gIssues.filter(function (i) { return i.week === cw; })[0];
+    var idx = gIssues.indexOf(iss);
+
+    VIEWS.forEach(function (v) { document.getElementById("v-" + v).setAttribute("aria-pressed", String(view === v)); });
+    document.getElementById("pager").hidden = view !== "issue" || gIssues.length < 2;
+    var sel = document.getElementById("p-sel");
+    sel.replaceChildren();
+    gIssues.forEach(function (i) { sel.append(h("option", { value: i.week, text: weekLabel(i.week) })); });
+    if (cw) sel.value = cw;
+    document.getElementById("p-prev").disabled = idx < 0 || idx >= gIssues.length - 1;
+    document.getElementById("p-next").disabled = idx <= 0;
+
+    var all = view !== "issue";
+    document.getElementById("c-genre").textContent = view === "genres" ? "ジャンル設定" : view === "setup" ? "設定" : (g ? g.name : "");
+    document.getElementById("c-week").textContent = all ? "全" + gIssues.length + "号" : (iss ? iss.week : "—");
+    document.getElementById("c-span").textContent = all ? (gIssues.length ? gIssues[gIssues.length - 1].week.replace(/^\d{2}/, "") + "〜" : "—") : (iss && iss.from ? md(iss.from) + "–" + md(iss.to) : "—");
+    document.getElementById("c-count").textContent = (all ? gIdeas.length : gIdeas.filter(function (i) { return iss && i.week === iss.week; }).length) + "件";
+
+    if (!canStore) main.append(h("p", { class: "note", text: "このブラウザでは保存が使えないため、閉じると内容が消えます。プライベートブラウズを解除して開き直してください。" }));
+    if (view === "genres") { genresView(main); return; }
+    if (view === "setup") { setupView(main); return; }
+    if (!store.genres.length) {
+      main.append(h("div", { class: "empty" }, h("strong", { text: "まだ何も入っていません" }), "「設定」からデータを読み込むか、「ジャンル」で調べたい分野を追加してください。"));
+      return;
+    }
+    if (store.genres.length > 1) main.append(chipRow(store.genres.map(function (x) { return [x.id, x.name + (x.enabled ? "" : "（停止中）")]; }), curGenre, function (v) { curGenre = v; fDom = "all"; pref("genre", v); }, "ジャンル", "genres"));
+
+    if (view === "ideas") {
+      if (!gIdeas.length) main.append(h("div", { class: "empty" }, h("strong", { text: "アイデアはまだありません" }), "号が入ると、各号のアイデアがここにたまっていきます。"));
+      else main.append(ideaSection(gIdeas, true, "アイデア帳"));
+    } else if (!iss) {
+      main.append(h("div", { class: "empty" }, h("strong", { text: "このジャンルの号はまだありません" }), ENGINE ? "「今すぐ調査」で最初の号を作れます。" : "AIと未連携のため、ここから号は作れません。「設定」からデータを読み込めます。"));
+      var eb = runButton(curGenre, "primary"); if (eb) main.append(h("div", null, eb));
+    } else issueView(main, iss, gIdeas);
+  }
+
+  function setView(v) { view = v; if (location.hash.slice(1) !== v) { try { history.replaceState(null, "", "#" + v); } catch (e) {} } render(); window.scrollTo(0, 0); }
+  function fromHash() { var v = location.hash.slice(1); view = VIEWS.indexOf(v) >= 0 ? v : "issue"; render(); }
+  VIEWS.forEach(function (v) { document.getElementById("v-" + v).addEventListener("click", function () { setView(v); }); });
+  function step(d) { var list = store.issues.filter(function (i) { return i.genre === curGenre; }); var i = list.findIndex(function (x) { return x.week === curWeek[curGenre]; }) + d; if (i >= 0 && i < list.length) { curWeek[curGenre] = list[i].week; render(); } }
+  document.getElementById("p-sel").addEventListener("change", function (e) { curWeek[curGenre] = e.target.value; render(); });
+  document.getElementById("p-prev").addEventListener("click", function () { step(1); });
+  document.getElementById("p-next").addEventListener("click", function () { step(-1); });
+  window.addEventListener("hashchange", fromHash);
+
+  load();
+  fromHash();
+})();
+</script>
+</body>
+</html>
