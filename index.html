@@ -169,6 +169,7 @@ details ol { margin: 8px 0 0; padding-left: 22px; font-size: 13px; overflow-wrap
 <script>
 (function () {
   "use strict";
+  var APP_VERSION = "1.1.0";
   var KEY = "weekly-report-v1";
   var CROSS = "横断", MAX_FOCUS = 4, MAX_GENRES = 6;
   var STAT = { star: "気になる", done: "検討済み", skip: "見送り" };
@@ -217,7 +218,7 @@ details ol { margin: 8px 0 0; padding-left: 22px; font-size: 13px; overflow-wrap
   function normalize(d) {
     var o = { genres: [], issues: [], ideas: [] };
     arr(d && d.genres).forEach(function (g) { if (g && str(g.id)) o.genres.push({ id: g.id, name: str(g.name), focus: arr(g.focus).filter(function (f) { return f && str(f.key) && str(f.label); }).map(function (f) { return { key: f.key, label: f.label }; }), regions: str(g.regions), note: str(g.note), enabled: g.enabled !== false, order: typeof g.order === "number" ? g.order : 0 }); });
-    arr(d && d.issues).forEach(function (i) { if (i && str(i.genre) && str(i.week)) o.issues.push({ genre: i.genre, week: i.week, from: str(i.from), to: str(i.to), summary: arr(i.summary).map(str), news: i.news && typeof i.news === "object" ? { current: arr(i.news.current), sales: arr(i.news.sales), industry: arr(i.news.industry) } : { current: [], sales: [], industry: [] }, watch: arr(i.watch), sources: arr(i.sources), mode: i.mode === "collect" ? "collect" : "ai", groups: Array.isArray(i.groups) ? i.groups.filter(function (x) { return x && typeof x === "object"; }).map(function (x) { return { label: str(x.label), items: arr(x.items) }; }) : null }); });
+    arr(d && d.issues).forEach(function (i) { if (i && str(i.genre) && str(i.week)) o.issues.push({ genre: i.genre, week: i.week, from: str(i.from), to: str(i.to), summary: arr(i.summary).map(str), news: i.news && typeof i.news === "object" ? { current: arr(i.news.current), sales: arr(i.news.sales), industry: arr(i.news.industry) } : { current: [], sales: [], industry: [] }, watch: arr(i.watch), sources: arr(i.sources), mode: i.mode === "collect" ? "collect" : "ai", groups: Array.isArray(i.groups) ? i.groups.filter(function (x) { return x && typeof x === "object"; }).map(function (x) { return { label: str(x.label), items: arr(x.items), note: str(x.note) }; }) : null }); });
     arr(d && d.ideas).forEach(function (i) { if (i && str(i.id) && str(i.genre) && str(i.week)) o.ideas.push({ id: i.id, genre: i.genre, week: i.week, no: Number(i.no) || 0, name: str(i.name), aim: str(i.aim), trigger: str(i.trigger), domain: str(i.domain), status: STAT[i.status] ? i.status : "", memo: str(i.memo), manual: i.manual === true }); });
     return o;
   }
@@ -268,41 +269,94 @@ details ol { margin: 8px 0 0; padding-left: 22px; font-size: 13px; overflow-wrap
       return { title: title, source: src, url: t("link"), time: isNaN(d.getTime()) ? 0 : d.getTime() };
     });
   }
-  /* 中継サービス：ブラウザはニュースサイトを直接読めないため、ここを経由する */
+  /* 中継サービス：ブラウザはニュースサイトを直接読めないため、ここを経由する。上から順に試す */
+  function httpText(r) { if (!r.ok) throw new Error("http " + r.status); return r.text(); }
+  function splitTitle(title, src) {
+    if (!src) { var m = /^(.*\S)\s+-\s+([^-]{1,40})$/.exec(title); if (m) return { title: m[1], source: m[2] }; return { title: title, source: "" }; }
+    if (title.slice(-(src.length + 3)) === " - " + src) title = title.slice(0, -(src.length + 3));
+    return { title: title, source: src };
+  }
+  function viaRss2json(u) {
+    return fetchT("https://api.rss2json.com/v1/api.json?rss_url=" + encodeURIComponent(u)).then(okJson).then(function (j) {
+      if (!j || j.status !== "ok") throw new Error("rss2json " + str(j && j.message).slice(0, 60));
+      return arr(j.items).map(function (it) {
+        var t = splitTitle(str(it && it.title).trim(), ""), d = new Date(str(it && it.pubDate).replace(" ", "T") + "Z");
+        return { title: t.title, source: t.source, url: str(it && it.link), time: isNaN(d.getTime()) ? 0 : d.getTime() };
+      });
+    });
+  }
+  function viaAllOriginsRaw(u) { return fetchT("https://api.allorigins.win/raw?url=" + encodeURIComponent(u)).then(httpText).then(parseRss); }
   function viaAllOrigins(u) {
     return fetchT("https://api.allorigins.win/get?url=" + encodeURIComponent(u)).then(okJson).then(function (j) {
       var c = str(j && j.contents), m = /^data:[^,]*;base64,(.*)$/.exec(c);
-      return m ? b64utf8(m[1]) : c;
+      return parseRss(m ? b64utf8(m[1]) : c);
     });
   }
-  function viaCodetabs(u) { return fetchT("https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(u)).then(function (r) { if (!r.ok) throw new Error("http " + r.status); return r.text(); }); }
-  function googleNews(qs) {
-    var u = "https://news.google.com/rss/search?q=" + encodeURIComponent(qs + " when:7d") + "&hl=ja&gl=JP&ceid=JP:ja";
-    return viaAllOrigins(u).then(parseRss).then(nonEmpty).catch(function () { return viaCodetabs(u).then(parseRss).then(nonEmpty); });
+  function viaCodetabs(u) { return fetchT("https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(u)).then(httpText).then(parseRss); }
+  var RELAYS = [["rss2json", viaRss2json], ["allorigins", viaAllOriginsRaw], ["allorigins", viaAllOrigins], ["codetabs", viaCodetabs]];
+  var relayOk = -1; // 前回成功した中継から試す
+
+  /* 「SDV・コックピット」のような注力領域を語に分け、OR検索にする */
+  function terms(label) { return str(label).split(/[・、,，\/／|｜\s]+/).map(function (t) { return t.trim(); }).filter(Boolean); }
+  function queries(g, f) {
+    var ts = terms(f.label), base = g.name.trim(), list = [];
+    if (ts.length > 1) list.push(base + " (" + ts.join(" OR ") + ")");
+    else if (ts.length) list.push(base + " " + ts[0]);
+    if (ts.length) list.push("(" + ts.join(" OR ") + ")");
+    list.push(base);
+    return list.filter(function (q, i) { return q.trim() && list.indexOf(q) === i; });
   }
-  function gdelt(qs) {
-    var u = "https://api.gdeltproject.org/api/v2/doc/doc?query=" + encodeURIComponent(qs) + "&mode=ArtList&format=json&timespan=7d&maxrecords=50&sort=DateDesc";
-    return fetchT(u).then(okJson).then(function (j) {
+  /* 1つの検索語を、中継を順に替えて取りに行く。結果：{ list, relayFail } */
+  function googleNews(q) {
+    var u = "https://news.google.com/rss/search?q=" + encodeURIComponent(q + " when:7d") + "&hl=ja&gl=JP&ceid=JP:ja";
+    var order = RELAYS.map(function (_, i) { return i; });
+    if (relayOk > 0) { order.splice(relayOk, 1); order.unshift(relayOk); }
+    var i = 0;
+    function next() {
+      if (i >= order.length) return Promise.resolve({ list: [], relayFail: true });
+      var k = order[i++];
+      return RELAYS[k][1](u).then(function (list) { relayOk = k; return { list: list, relayFail: false }; }, next);
+    }
+    return next();
+  }
+  var gdeltAt = 0; // GDELTは5秒以上あけないと拒否される
+  function gdelt(q) {
+    var u = "https://api.gdeltproject.org/api/v2/doc/doc?query=" + encodeURIComponent(q) + "&mode=ArtList&format=json&timespan=7d&maxrecords=50&sort=DateDesc";
+    var gap = gdeltAt + 5500 - Date.now();
+    return wait(Math.max(0, gap)).then(function () { gdeltAt = Date.now(); return fetchT(u); }).then(httpText).then(function (t) {
+      var j; try { j = JSON.parse(t); } catch (e) { throw new Error("gdelt " + t.slice(0, 60)); }
       return arr(j && j.articles).map(function (a) {
         var m = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})/.exec(str(a && a.seendate));
         return { title: str(a && a.title), source: str(a && a.domain), url: str(a && a.url), time: m ? Date.UTC(+m[1], m[2] - 1, +m[3], +m[4], +m[5]) : 0 };
       });
-    }).then(nonEmpty);
+    });
   }
   function collect(g) {
     var cutoff = Date.now() - 7 * 86400000, seen = {}, groups = [], chain = Promise.resolve();
     g.focus.forEach(function (f) {
       chain = chain.then(function () {
-        var qs = g.name + " " + f.label;
-        return googleNews(qs).catch(function () { return gdelt(qs); }).catch(function () { return []; }).then(function (list) {
-          var items = [];
+        var qs = queries(g, f), items = [], relayFail = false, qi = 0;
+        function take(list) {
           list.forEach(function (x) {
             var k = x.title.replace(/\s+/g, "").toLowerCase();
             if (!x.title || !safeUrl(x.url) || seen[k] || (x.time && x.time < cutoff) || items.length >= 8) return;
             seen[k] = true; items.push({ title: x.title, source: x.source, url: x.url, date: x.time ? ymd(new Date(x.time)) : "", focus: f.key });
           });
-          groups.push({ label: f.label, items: items });
-          return wait(600);
+        }
+        function step() {
+          if (items.length >= 3 || qi >= qs.length) return Promise.resolve();
+          var q = qs[qi++];
+          return googleNews(q).then(function (r) { if (r.relayFail) relayFail = true; take(r.list); return step(); });
+        }
+        return step().then(function () {
+          if (items.length) return;
+          var ts = terms(f.label).filter(function (t) { return /^[\x20-\x7e]+$/.test(t) && t.length >= 3; });
+          var q = ts.length > 1 ? "(" + ts.join(" OR ") + ")" : ts.length ? ts[0] : g.name;
+          return gdelt(q).then(take, function () {});
+        }).then(function () {
+          var note = items.length ? "" : relayFail ? "中継サービスにつながりませんでした" : "直近7日に該当するニュースが見つかりませんでした";
+          groups.push({ label: f.label, items: items, note: note });
+          return wait(400);
         });
       });
     });
@@ -417,7 +471,7 @@ details ol { margin: 8px 0 0; padding-left: 22px; font-size: 13px; overflow-wrap
     busy[gid] = "ニュースを収集中…"; render();
     collect(g).then(function (groups) {
       var total = groups.reduce(function (n, gp) { return n + gp.items.length; }, 0);
-      if (!total) { var e = new Error("none"); e.user = "ニュースを取得できませんでした。中継サービスが応答していない可能性があります。時間をおいてお試しください"; throw e; }
+      if (!total) { var e = new Error("none"); e.user = groups.some(function (gp) { return gp.note.indexOf("中継") === 0; }) ? "ニュースを取得できませんでした。中継サービスにつながりません。時間をおいてお試しください" : "直近7日に該当するニュースが見つかりませんでした。ジャンル名や注力領域の言葉を変えてみてください"; throw e; }
       if (!aiOn()) return { r: collectOnly(groups) };
       busy[gid] = PROVIDERS[AI.provider].name + " が要約中…"; render();
       return applyAi(g, ctx, groups).then(function (r) { return { r: r }; }, function (e) { return { r: collectOnly(groups), warn: aiMessage(e) }; });
@@ -552,7 +606,8 @@ details ol { margin: 8px 0 0; padding-left: 22px; font-size: 13px; overflow-wrap
     if (iss.mode === "collect") sec.append(h("p", { class: "note", text: "AIなしで集めた見出しです。要約とアイデアの提案は付きません。" }));
     sec.append(chipRow(tabs.map(function (t) { return [t[0], t[1], t[2].length]; }), newsTab, function (v) { newsTab = v; pref("news", v); }, "ニュース区分"));
     var items = (tabs.filter(function (t) { return t[0] === newsTab; })[0] || [0, 0, []])[2];
-    if (!items.length) sec.append(h("div", { class: "empty", text: "この区分のニュースはありません。" }));
+    var gnote = iss.groups ? str((iss.groups[+newsTab.slice(1)] || {}).note) : "";
+    if (!items.length) sec.append(h("div", { class: "empty", text: gnote || "この区分のニュースはありません。" }));
     else {
       var nl = h("ul", { class: "list news" });
       items.forEach(function (n) {
@@ -678,7 +733,7 @@ details ol { margin: 8px 0 0; padding-left: 22px; font-size: 13px; overflow-wrap
 
   /* ---------- 設定（AI連携・データ） ---------- */
   function exportData() {
-    var blob = new Blob([JSON.stringify({ app: "weekly-report", version: 1, exportedAt: new Date().toISOString(), genres: store.genres, issues: store.issues, ideas: store.ideas }, null, 1)], { type: "application/json" });
+    var blob = new Blob([JSON.stringify({ app: "weekly-report", version: 1, appVersion: APP_VERSION, exportedAt: new Date().toISOString(), genres: store.genres, issues: store.issues, ideas: store.ideas }, null, 1)], { type: "application/json" });
     var a = h("a", { href: URL.createObjectURL(blob), download: "weekly-report-" + ymd(new Date()) + ".json" });
     document.body.append(a); a.click(); a.remove(); setTimeout(function () { URL.revokeObjectURL(a.href); }, 5000);
   }
@@ -752,7 +807,7 @@ details ol { margin: 8px 0 0; padding-left: 22px; font-size: 13px; overflow-wrap
     ai.append(box);
     main.append(ai);
     main.append(h("section", null, h("h2", { text: "ニュースの集め方" }), h("div", { class: "box" },
-      h("p", { text: "ジャンル名と注力領域をキーワードに、直近7日の日本語ニュースを検索します。ブラウザからはニュースサイトを直接読めないため、無料の中継サービスを経由します。キーワードは中継サービスに渡り、サービスが止まっている間は収集できません。" }))));
+      h("p", { text: "ジャンル名と注力領域をキーワードに、直近7日の日本語ニュースを検索します。注力領域は「・」や「、」で区切ると、いずれかを含む記事を探します。ブラウザからはニュースサイトを直接読めないため、無料の中継サービスを経由します。キーワードは中継サービスに渡り、サービスが止まっている間は収集できません。" }))));
 
     var data = h("section", null, h("h2", { text: "データ" }));
     var file = h("input", { type: "file", accept: "application/json,.json", "aria-label": "データファイルを選ぶ" });
@@ -764,6 +819,7 @@ details ol { margin: 8px 0 0; padding-left: 22px; font-size: 13px; overflow-wrap
         h("span", { class: "act filebtn" }, "読み込む", file)),
       h("p", { class: "note", text: "読み込みは今のデータに追加・上書きします。同じアイデアに付けた印とメモは残ります。現在：ジャンル " + store.genres.length + "・号 " + store.issues.length + "・アイデア " + store.ideas.length })));
     main.append(data);
+    main.append(h("p", { class: "note", style: "text-align:center", text: "Weekly Report v" + APP_VERSION }));
   }
 
   /* ---------- 全体 ---------- */
