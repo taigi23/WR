@@ -190,7 +190,7 @@ details ol { margin: 8px 0 0; padding-left: 22px; font-size: 13px; overflow-wrap
 <script>
 (function () {
   "use strict";
-  var APP_VERSION = "1.4.0";
+  var APP_VERSION = "1.5.0";
   var KEY = "weekly-report-v1";
   var CROSS = "横断", MAX_FOCUS = 4, MAX_GENRES = 6;
   var STAT = { star: "気になる", done: "検討済み", skip: "見送り" };
@@ -281,14 +281,32 @@ details ol { margin: 8px 0 0; padding-left: 22px; font-size: 13px; overflow-wrap
   function okJson(r) { if (!r.ok) throw new Error("http " + r.status); return r.json(); }
   function nonEmpty(list) { if (!list.length) throw new Error("empty"); return list; }
   function b64utf8(b) { var bin = atob(b), u = new Uint8Array(bin.length); for (var i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return new TextDecoder("utf-8").decode(u); }
+  /* 転送用リンクから本当の記事URLを取り出す（Bing は url= に入っている。Google は古い形式なら中に埋まっている） */
+  function realUrl(u) {
+    u = str(u).trim();
+    try {
+      var x = new URL(u);
+      if (/(^|\.)bing\.com$/.test(x.hostname)) { var r = x.searchParams.get("url"); if (safeUrl(r)) return r; }
+      if (x.hostname === "news.google.com") {
+        var m = /\/articles\/([A-Za-z0-9_-]+)/.exec(x.pathname);
+        if (m) {
+          var b = m[1].replace(/-/g, "+").replace(/_/g, "/"); while (b.length % 4) b += "=";
+          var bin = atob(b), k = bin.search(/https?:\/\//);
+          if (k >= 0) { var hit = /^https?:\/\/[\x21-\x7e]+/.exec(bin.slice(k)); if (hit) return hit[0].replace(/[\x00-\x1f\x7f-\xff].*$/, ""); }
+        }
+      }
+    } catch (e) {}
+    return u;
+  }
   function parseRss(xml) {
     var doc = new DOMParser().parseFromString(xml, "text/xml");
     if (doc.querySelector("parsererror")) return [];
     return Array.prototype.map.call(doc.querySelectorAll("item"), function (it) {
-      function t(n) { var e = it.querySelector(n); return e ? (e.textContent || "").trim() : ""; }
-      var title = t("title"), src = t("source"), d = new Date(t("pubDate"));
+      function t(n) { var e = it.getElementsByTagName(n)[0]; return e ? (e.textContent || "").trim() : ""; }
+      var title = t("title"), src = t("source") || t("News:Source"), d = new Date(t("pubDate")), url = realUrl(t("link"));
       if (src && title.slice(-(src.length + 3)) === " - " + src) title = title.slice(0, -(src.length + 3));
-      return { title: title, source: src, url: t("link"), time: isNaN(d.getTime()) ? 0 : d.getTime() };
+      if (!src) { try { src = new URL(url).hostname.replace(/^www\./, ""); } catch (e) {} }
+      return { title: title, source: src, url: url, time: isNaN(d.getTime()) ? 0 : d.getTime() };
     });
   }
   /* 中継サービス：ブラウザはニュースサイトを直接読めないため、ここを経由する。上から順に試す */
@@ -336,14 +354,22 @@ details ol { margin: 8px 0 0; padding-left: 22px; font-size: 13px; overflow-wrap
       ps.forEach(function (p) { p.then(res, function () { if (--left === 0) rej(new Error("all failed")); }); });
     });
   }
-  function googleNews(q) {
-    var u = "https://news.google.com/rss/search?q=" + encodeURIComponent(q + " when:7d") + "&hl=ja&gl=JP&ceid=JP:ja";
+  function fetchFeed(u) {
     function race(ks) { return anyOf(ks.map(function (k) { return RELAYS[k][1](u).then(function (list) { relayOk = k; return list; }); })); }
     var all = RELAYS.map(function (_, i) { return i; });
     var first = relayOk >= 0 ? RELAYS[relayOk][1](u).then(function (l) { return l; }) : Promise.reject(new Error("skip"));
     var pref = relayOk;
     return first.catch(function () { return race(all.filter(function (k) { return k !== pref; })); })
       .then(function (list) { return { list: list, relayFail: false }; }, function () { relayOk = -1; return { list: [], relayFail: true }; });
+  }
+  /* 見出しは Bing ニュースを優先（記事の本当のURLが取れる）。0件や失敗なら Google ニュース */
+  function searchNews(q) {
+    var bing = "https://www.bing.com/news/search?q=" + encodeURIComponent(q) + "&format=rss&setlang=ja&cc=JP&mkt=ja-JP&qft=" + encodeURIComponent('interval="8"');
+    var google = "https://news.google.com/rss/search?q=" + encodeURIComponent(q + " when:7d") + "&hl=ja&gl=JP&ceid=JP:ja";
+    return fetchFeed(bing).then(function (r) {
+      if (r.list.length) return r;
+      return fetchFeed(google).then(function (g) { return { list: g.list, relayFail: r.relayFail && g.relayFail }; });
+    });
   }
   var gdeltAt = 0; // GDELTは5秒以上あけないと拒否される
   function gdelt(q) {
@@ -373,7 +399,7 @@ details ol { margin: 8px 0 0; padding-left: 22px; font-size: 13px; overflow-wrap
         function step() {
           if (items.length >= 3 || qi >= qs.length) return Promise.resolve();
           var q = qs[qi++];
-          return googleNews(q).then(function (r) { if (r.relayFail) relayFail = true; take(r.list); return step(); });
+          return searchNews(q).then(function (r) { if (r.relayFail) relayFail = true; take(r.list); return step(); });
         }
         return step().then(function () {
           if (items.length) return;
@@ -448,7 +474,7 @@ details ol { margin: 8px 0 0; padding-left: 22px; font-size: 13px; overflow-wrap
     return next().then(function (a) { readCache[u] = a; return a; });
   }
   function openReader(n) {
-    var u = safeUrl(n.url); if (!u) return;
+    var u = safeUrl(realUrl(n.url)); if (!u) return;
     var box = document.getElementById("reader"), meta = document.getElementById("rd-meta"), text = document.getElementById("rd-text");
     readBack = document.activeElement; var seq = ++readSeq;
     document.getElementById("rd-title").textContent = str(n.title);
