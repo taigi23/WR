@@ -135,6 +135,17 @@ details { background: var(--surface); border: 1px solid var(--line); padding: 10
 summary { cursor: pointer; font-weight: 500 }
 details ol { margin: 8px 0 0; padding-left: 22px; font-size: 13px; overflow-wrap: anywhere }
 .note { font-size: 12.5px; color: var(--muted); margin: 0 }
+#reader { position: fixed; inset: 0; z-index: 15; background: var(--bg); overflow-y: auto; -webkit-overflow-scrolling: touch;
+  padding: env(safe-area-inset-top, 0px) max(16px, env(safe-area-inset-right, 0px)) calc(40px + env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px)) }
+.rd-bar { position: sticky; top: 0; background: var(--bg); display: flex; justify-content: space-between; gap: 8px; padding: 10px 0; max-width: 680px; margin: 0 auto; border-bottom: 1px solid var(--line) }
+.rd-bar a.act { text-decoration: none; color: inherit }
+.rd-body { max-width: 680px; margin: 0 auto; padding-top: 14px }
+.rd-body h2 { display: block; font-size: 21px; line-height: 1.45; margin: 6px 0 14px; letter-spacing: .02em }
+#rd-text p { margin: 0 0 1em; font-size: 16px; line-height: 1.9; overflow-wrap: anywhere }
+#rd-text h3 { font-size: 17px; margin: 1.4em 0 .5em }
+#rd-text .note { margin-top: 1em }
+.news h3 button { all: unset; cursor: pointer; text-decoration: underline; text-decoration-color: var(--line); text-underline-offset: 4px }
+.news h3 button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px }
 #toast { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(18px + env(safe-area-inset-bottom, 0px)); background: var(--ink); color: var(--bg); padding: 8px 16px; font-size: 13px; border-radius: 4px; z-index: 20; max-width: 90vw }
 .seg button { padding: 7px 10px }
 .filebtn { position: relative; overflow: hidden; display: inline-block }
@@ -171,11 +182,15 @@ details ol { margin: 8px 0 0; padding-left: 22px; font-size: 13px; overflow-wrap
   <main id="main"></main>
 </div>
 <div id="toast" hidden></div>
+<div id="reader" hidden role="dialog" aria-modal="true" aria-labelledby="rd-title">
+  <div class="rd-bar"><button type="button" id="rd-close" class="act">← 戻る</button><a id="rd-orig" class="act" target="_blank" rel="noopener noreferrer">元の記事を開く</a></div>
+  <article class="rd-body"><div class="meta" id="rd-meta"></div><h2 id="rd-title"></h2><div id="rd-text"></div></article>
+</div>
 
 <script>
 (function () {
   "use strict";
-  var APP_VERSION = "1.3.0";
+  var APP_VERSION = "1.4.0";
   var KEY = "weekly-report-v1";
   var CROSS = "横断", MAX_FOCUS = 4, MAX_GENRES = 6;
   var STAT = { star: "気になる", done: "検討済み", skip: "見送り" };
@@ -184,8 +199,8 @@ details ol { margin: 8px 0 0; padding-left: 22px; font-size: 13px; overflow-wrap
 
   /* AI連携の設定。APIキーはこの端末のブラウザにだけ保存し、書き出しには含めない。 */
   var PROVIDERS = {
-    gemini: { name: "Gemini", model: "gemini-3.5-flash" },
-    openai: { name: "ChatGPT", model: "gpt-6-luna" }
+    gemini: { name: "Gemini", model: "gemini-3.6-flash", fallback: "gemini-3.5-flash-lite", old: ["gemini-3.5-flash"] },
+    openai: { name: "ChatGPT", model: "gpt-6-luna", fallback: "gpt-6.1-terra", old: [] }
   };
   var AI = { provider: "", key: "", model: "" }, aiDraft = null, aiModels = [], aiNote = "";
   function aiOn() { return !!(PROVIDERS[AI.provider] && AI.key && AI.model); }
@@ -235,7 +250,8 @@ details ol { margin: 8px 0 0; padding-left: 22px; font-size: 13px; overflow-wrap
   }
   function load() {
     try { var raw = localStorage.getItem(KEY); if (raw) store = normalize(JSON.parse(raw)); curGenre = localStorage.getItem(KEY + ":genre"); newsTab = localStorage.getItem(KEY + ":news") || "current";
-      var a = JSON.parse(localStorage.getItem(KEY + ":ai") || "{}"); if (a && PROVIDERS[a.provider]) AI = { provider: a.provider, key: str(a.key), model: str(a.model) || PROVIDERS[a.provider].model }; }
+      var a = JSON.parse(localStorage.getItem(KEY + ":ai") || "{}"); if (a && PROVIDERS[a.provider]) AI = { provider: a.provider, key: str(a.key), model: str(a.model) || PROVIDERS[a.provider].model };
+      if (PROVIDERS[AI.provider].old.indexOf(AI.model) >= 0) AI.model = PROVIDERS[AI.provider].model; /* 古い既定モデルは新しい既定へ */ }
     catch (e) { canStore = false; }
     sortAll();
   }
@@ -374,6 +390,98 @@ details ol { margin: 8px 0 0; padding-left: 22px; font-size: 13px; overflow-wrap
   }
   function collectOnly(groups) { return { mode: "collect", summary: [], news: { current: [], sales: [], industry: [] }, groups: groups, sources: [], ideas: [] }; }
 
+
+  /* ---------- 記事をアプリ内で読む（本文だけを取り出して表示） ---------- */
+  var readCache = {}, readSeq = 0, readBack = null;
+  /* Jina Reader：ページを開いて本文をMarkdownで返す無料サービス。Googleニュースの転送リンクも辿れる */
+  function viaJina(u) {
+    return fetchT("https://r.jina.ai/" + u, null, 25000).then(httpText).then(function (t) {
+      var title = (/^Title:\s*(.*)$/m.exec(t) || [])[1] || "", src = (/^URL Source:\s*(.*)$/m.exec(t) || [])[1] || "";
+      var i = t.indexOf("Markdown Content:"), body = i >= 0 ? t.slice(i + 17) : t;
+      var paras = mdParas(body);
+      if (textLen(paras) < 120) throw new Error("short");
+      return { title: title.trim(), url: src.trim(), paras: paras };
+    });
+  }
+  function mdParas(mdText) {
+    var out = [];
+    mdText.replace(/\r/g, "").split(/\n{2,}/).forEach(function (b) {
+      b = b.trim(); if (!b) return;
+      if (/^!\[|^\[!\[/.test(b) || /^(\*\s*){3,}$|^-{3,}$|^={3,}$/.test(b)) return;
+      var head = /^#{1,6}\s+(.*)$/.exec(b);
+      var t = b.replace(/!\[[^\]]*\]\([^)]*\)/g, "").replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/[*_`>]+/g, "").replace(/^\s*[-+]\s+/gm, "・").replace(/\s*\n\s*/g, " ").trim();
+      if (!t) return;
+      if (head) out.push({ h: true, t: head[1].replace(/[*_`#]+/g, "").trim() });
+      else if (t.length >= 20 || /[。．!?！？]$/.test(t)) out.push({ h: false, t: t });
+    });
+    return trimNoise(out);
+  }
+  /* ページのHTMLから本文らしい段落を取り出す（中継サービス経由） */
+  function htmlParas(html) {
+    var doc = new DOMParser().parseFromString(html, "text/html");
+    ["script", "style", "noscript", "nav", "header", "footer", "aside", "form", "iframe", "figure"].forEach(function (t) { Array.prototype.forEach.call(doc.querySelectorAll(t), function (n) { n.remove(); }); });
+    var title = ((doc.querySelector('meta[property="og:title"]') || {}).content) || (doc.querySelector("h1") || doc.querySelector("title") || { textContent: "" }).textContent;
+    var best = null, bestLen = 0;
+    Array.prototype.forEach.call(doc.querySelectorAll("article, main, [itemprop=articleBody], div, section"), function (n) {
+      var len = 0; Array.prototype.forEach.call(n.querySelectorAll(":scope > p"), function (p) { len += p.textContent.trim().length; });
+      if (len > bestLen) { bestLen = len; best = n; }
+    });
+    var paras = [];
+    if (best) Array.prototype.forEach.call(best.querySelectorAll("p, h2, h3"), function (n) {
+      var t = n.textContent.replace(/\s+/g, " ").trim(); if (!t) return;
+      if (/^H/.test(n.tagName)) paras.push({ h: true, t: t }); else if (t.length >= 15) paras.push({ h: false, t: t });
+    });
+    paras = trimNoise(paras);
+    if (textLen(paras) < 120) throw new Error("short");
+    return { title: str(title).trim(), url: "", paras: paras };
+  }
+  function trimNoise(ps) { return ps.filter(function (p) { return !/^(関連記事|あわせて読みたい|この記事を(シェア|共有)|Copyright|©|PR$|広告)/.test(p.t); }).slice(0, 120); }
+  function textLen(ps) { return ps.reduce(function (n, p) { return n + (p.h ? 0 : p.t.length); }, 0); }
+  function fetchArticle(u) {
+    if (readCache[u]) return Promise.resolve(readCache[u]);
+    var direct = !/^https:\/\/news\.google\.com\//.test(u);
+    var tries = [function () { return viaJina(u); }];
+    if (direct) tries.push(function () { return fetchT("https://api.allorigins.win/raw?url=" + encodeURIComponent(u), null, RELAY_MS).then(httpText).then(htmlParas); },
+                          function () { return fetchT("https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(u), null, RELAY_MS).then(httpText).then(htmlParas); });
+    var i = 0;
+    function next() { if (i >= tries.length) return Promise.reject(new Error("unreadable")); return tries[i++]().catch(next); }
+    return next().then(function (a) { readCache[u] = a; return a; });
+  }
+  function openReader(n) {
+    var u = safeUrl(n.url); if (!u) return;
+    var box = document.getElementById("reader"), meta = document.getElementById("rd-meta"), text = document.getElementById("rd-text");
+    readBack = document.activeElement; var seq = ++readSeq;
+    document.getElementById("rd-title").textContent = str(n.title);
+    document.getElementById("rd-orig").href = u;
+    meta.replaceChildren();
+    if (n.source) meta.append(h("span", { class: "tag", text: str(n.source) }));
+    if (n.date) meta.append(h("span", { text: str(n.date) }));
+    text.replaceChildren(h("p", { class: "note", "aria-live": "polite", text: "記事を読み込み中…（10秒ほどかかることがあります）" }));
+    box.hidden = false; box.scrollTop = 0; document.body.style.overflow = "hidden";
+    document.getElementById("rd-close").focus();
+    try { history.pushState({ reader: 1 }, "", location.hash || "#issue"); } catch (e) {}
+    fetchArticle(u).then(function (a) {
+      if (seq !== readSeq || box.hidden) return;
+      if (a.url && safeUrl(a.url)) document.getElementById("rd-orig").href = a.url;
+      text.replaceChildren();
+      a.paras.forEach(function (p) { text.append(h(p.h ? "h3" : "p", { text: p.t })); });
+      text.append(h("p", { class: "note", text: "本文を自動で取り出して表示しています。図表や一部の文章が欠けることがあります。正確な内容は元の記事で確認してください。" }));
+    }, function () {
+      if (seq !== readSeq || box.hidden) return;
+      text.replaceChildren(h("p", { text: "この記事はアプリ内で読めませんでした。会員限定の記事や、読み取りを拒否しているサイトの可能性があります。" }),
+        h("p", null, h("a", { href: u, target: "_blank", rel: "noopener noreferrer", text: "元の記事を開く" })));
+    });
+  }
+  function closeReader(fromPop) {
+    var box = document.getElementById("reader"); if (box.hidden) return;
+    box.hidden = true; readSeq++; document.body.style.overflow = "";
+    if (!fromPop) { try { if (history.state && history.state.reader) history.back(); } catch (e) {} }
+    if (readBack && readBack.focus) readBack.focus();
+  }
+  document.getElementById("rd-close").addEventListener("click", function () { closeReader(false); });
+  window.addEventListener("popstate", function () { closeReader(true); });
+  document.addEventListener("keydown", function (e) { if (e.key === "Escape") closeReader(false); });
+
   /* ---------- AI連携（Gemini / ChatGPT）。集めた見出しを要約し、アイデアを作る ---------- */
   function aiJson(r) {
     if (r.ok) return r.json();
@@ -386,18 +494,18 @@ details ol { margin: 8px 0 0; padding-left: 22px; font-size: 13px; overflow-wrap
     if (s === 401 || s === 403) return "APIキーが正しくないか、このキーでは使えません" + d;
     if (s === 404) return "モデル名が見つかりません。設定で別のモデルを選んでください" + d;
     if (s === 429) return "利用上限に達したか、残高が不足しています。時間をおくか利用状況を確認してください" + d;
-    if (s >= 500) return "AI側が一時的に応答していません。時間をおいてお試しください";
+    if (s >= 500) return "AI側が混み合っていて応答しませんでした（再試行と軽いモデルへの切替も試しました）。時間をおいてお試しください" + d;
     if (e && e.name === "AbortError") return "AIの応答が時間内に返りませんでした";
     if (e && e.parse) return "AIの返答を読み取れませんでした。もう一度お試しください";
     return "AIに接続できませんでした。通信環境を確認してください";
   }
-  function callGemini(prompt) {
-    var u = "https://generativelanguage.googleapis.com/v1beta/models/" + encodeURIComponent(AI.model) + ":generateContent?key=" + encodeURIComponent(AI.key);
+  function callGemini(prompt, model) {
+    var u = "https://generativelanguage.googleapis.com/v1beta/models/" + encodeURIComponent(model || AI.model) + ":generateContent?key=" + encodeURIComponent(AI.key);
     return fetchT(u, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ contents: [{ role: "user", parts: [{ text: prompt }] }], generationConfig: { responseMimeType: "application/json" } }) }, 120000)
       .then(aiJson).then(function (j) { var c = arr(j && j.candidates)[0]; return arr(c && c.content && c.content.parts).map(function (p) { return str(p && p.text); }).join(""); });
   }
-  function callOpenAI(prompt) {
-    return fetchT("https://api.openai.com/v1/responses", { method: "POST", headers: { "Content-Type": "application/json", "Authorization": "Bearer " + AI.key }, body: JSON.stringify({ model: AI.model, input: prompt, text: { format: { type: "json_object" } } }) }, 120000)
+  function callOpenAI(prompt, model) {
+    return fetchT("https://api.openai.com/v1/responses", { method: "POST", headers: { "Content-Type": "application/json", "Authorization": "Bearer " + AI.key }, body: JSON.stringify({ model: model || AI.model, input: prompt, text: { format: { type: "json_object" } } }) }, 120000)
       .then(aiJson).then(function (j) {
         var out = "";
         arr(j && j.output).forEach(function (o) { if (o && o.type === "message") arr(o.content).forEach(function (c) { if (c && c.type === "output_text") out += str(c.text); }); });
@@ -430,11 +538,27 @@ details ol { margin: 8px 0 0; padding-left: 22px; font-size: 13px; overflow-wrap
     L.push("ideas は10〜15件。幅広く出す。既に他社が量産・提供済みのものの単純な後追いは避け、2〜5年先を見た切り口にする。注力領域を中心に、領域をまたぐものも含める。");
     return L.join("\n");
   }
+  /* 混雑（429/5xx）や時間切れのときは、間をあけて同じモデルで2回まで再試行し、それでもだめなら軽いモデルで1回試す */
+  function callAiOnce(prompt, model) { return AI.provider === "gemini" ? callGemini(prompt, model) : callOpenAI(prompt, model); }
+  function retryable(e) { var s = e && e.status; return s === 429 || s >= 500 || (e && e.name === "AbortError"); }
+  function callAiRetry(prompt) {
+    var P = PROVIDERS[AI.provider], plan = [[AI.model, 0], [AI.model, 3000], [AI.model, 8000]];
+    if (P.fallback && P.fallback !== AI.model) plan.push([P.fallback, 2000]);
+    var i = 0;
+    function attempt() {
+      var step = plan[i++];
+      return wait(step[1]).then(function () { return callAiOnce(prompt, step[0]); }).catch(function (e) {
+        if (i < plan.length && retryable(e) && !(e.status === 429 && /quota|billing|残高|insufficient/i.test(str(e.detail)))) return attempt();
+        throw e;
+      });
+    }
+    return attempt();
+  }
   function applyAi(g, ctx, groups) {
     var flat = [];
     groups.forEach(function (gp) { gp.items.forEach(function (x) { flat.push(x); }); });
     var prompt = buildPrompt(g, ctx, flat);
-    return (AI.provider === "gemini" ? callGemini(prompt) : callOpenAI(prompt)).then(function (text) {
+    return callAiRetry(prompt).then(function (text) {
       var j = parseJson(text), used = {}, sources = [], news = {};
       NEWS.forEach(function (c) {
         news[c[0]] = arr(j.news && j.news[c[0]]).map(function (x) {
@@ -628,7 +752,7 @@ details ol { margin: 8px 0 0; padding-left: 22px; font-size: 13px; overflow-wrap
         var u = safeUrl(n.url);
         if (u) meta.append(h("a", { href: u, target: "_blank", rel: "noopener noreferrer", text: str(n.source) || "出典" }));
         else if (n.source) meta.append(h("span", { text: str(n.source) }));
-        nl.append(h("li", null, h("h3", { text: str(n.title) }), n.body ? h("p", { text: str(n.body) }) : null, meta));
+        nl.append(h("li", null, h("h3", null, u ? h("button", { type: "button", text: str(n.title), on: { click: function () { openReader(n); } } }) : document.createTextNode(str(n.title))), n.body ? h("p", { text: str(n.body) }) : null, meta));
       });
       sec.append(nl);
     }
@@ -817,7 +941,7 @@ details ol { margin: 8px 0 0; padding-left: 22px; font-size: 13px; overflow-wrap
     ai.append(box);
     main.append(ai);
     main.append(h("section", null, h("h2", { text: "ニュースの集め方" }), h("div", { class: "box" },
-      h("p", { text: "ジャンル名と注力領域をキーワードに、直近7日の日本語ニュースを検索します。注力領域は「・」や「、」で区切ると、いずれかを含む記事を探します。ブラウザからはニュースサイトを直接読めないため、無料の中継サービスを経由します。キーワードは中継サービスに渡り、サービスが止まっている間は収集できません。" }))));
+      h("p", { text: "ジャンル名と注力領域をキーワードに、直近7日の日本語ニュースを検索します。注力領域は「・」や「、」で区切ると、いずれかを含む記事を探します。ブラウザからはニュースサイトを直接読めないため、無料の中継サービスを経由します。キーワードは中継サービスに渡り、サービスが止まっている間は収集できません。見出しを押すと、記事の本文を無料の読み取りサービス（Jina Reader など）で取り出してアプリ内に表示します。このとき記事のURLがそのサービスに渡ります。" }))));
 
     var data = h("section", null, h("h2", { text: "データ" }));
     var file = h("input", { type: "file", accept: "application/json,.json", "aria-label": "データファイルを選ぶ" });
